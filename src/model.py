@@ -17,7 +17,7 @@ class PillarEncoder(nn.Module):
         self.conv = nn.Conv1d(in_channels, out_channels, 1)
         self.bn = nn.BatchNorm1d(out_channels)
     
-    def forward(self, x):
+    def forward(self, x):   
         """
         Args:
             x: (B, max_pillars, max_points, C)

@@ -154,7 +154,7 @@ def main():
     
     # Dataset
     print("\nLoading dataset...")
-    train_dataset = WaymoDataset(data_dir, split='validation')  # Using validation for now
+    train_dataset = WaymoDataset(data_dir, split='training')  # Using validation for now
     
     train_loader = DataLoader(
         train_dataset,
