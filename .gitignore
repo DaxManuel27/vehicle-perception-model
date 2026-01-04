@@ -1,0 +1,13 @@
+# Data files
+data/
+*.parquet
+*.gstmp
+
+# Checkpoints
+checkpoints/
+*.pth
+
+# Python
+__pycache__/
+*.pyc
+venv/
