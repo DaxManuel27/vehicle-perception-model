@@ -216,7 +216,7 @@ class LiDARViewer:
             # Add intensity channel (zeros) for model
             if full_points.shape[1] == 3:
                 full_points = np.hstack([full_points, np.zeros((len(full_points), 1))])
-            pred_boxes = self.detector.predict(full_points, threshold=0.05)
+            pred_boxes = self.detector.predict(full_points, threshold=0.5)
             for pred in pred_boxes:
                 cx, cy, cz, l, w, h, heading, score = pred
                 box = {
