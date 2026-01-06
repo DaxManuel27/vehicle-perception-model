@@ -134,19 +134,14 @@ def main():
                         help='Checkpoint directory')
     parser.add_argument('--resume', type=str, default=None,
                         help='Resume from checkpoint')
-                        # ... existing code ...
-    parser.add_argument('--resume', type=str, default=None,
-                        help='Resume from checkpoint')
-    # ADD THESE TWO LINES:
     parser.add_argument('--gcs', action='store_true',
                         help='Stream data from GCS instead of local files')
     parser.add_argument('--max_files', type=int, default=None,
                         help='Limit number of files to use')
     args = parser.parse_args()
-# ... existing code ...
-    args = parser.parse_args()
     
     # Device
+        # Device
     if torch.cuda.is_available():
         device = torch.device('cuda')
         print(f"Using CUDA: {torch.cuda.get_device_name(0)}")
@@ -155,23 +150,21 @@ def main():
         print("Using Apple MPS")
     else:
         device = torch.device('cpu')
-        # ... existing code ...
+        print("Using CPU")
+    
+    # Get absolute path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, '..', 'data')
+    checkpoint_dir = os.path.join(script_dir, '..', 'checkpoints')
+    
     # Dataset
     print("\nLoading dataset...")
-    # CHANGE THIS LINE:
     train_dataset = WaymoDataset(
         data_dir, 
         split='training',
         use_gcs=args.gcs,
         max_files=args.max_files
     )
-# ... existing code ...
-    print("Using CPU")
-    
-    # Get absolute path
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(script_dir, '..', 'data')
-    checkpoint_dir = os.path.join(script_dir, '..', 'checkpoints')
     
     # Dataset
     print("\nLoading dataset...")

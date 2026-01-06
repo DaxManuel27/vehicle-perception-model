@@ -1,6 +1,6 @@
 """
 Dataset for Waymo LiDAR object detection.
-Loads point clouds and bounding box labels.
+Loads point clouds and bounding box labels from GCS or local.
 """
 
 import torch
@@ -11,35 +11,72 @@ import os
 
 
 class WaymoDataset(Dataset):
-    def __init__(self, data_dir, split='validation', max_points=100000):
+    def __init__(self, data_dir, split='training', max_points=100000, use_gcs=False, max_files=None):
         """
         Args:
-            data_dir: Path to data directory containing lidar/ and lidar_box/ folders
+            data_dir: Path to data directory (ignored if use_gcs=True)
             split: 'training' or 'validation'
             max_points: Maximum points to keep per frame
+            use_gcs: If True, stream from GCS bucket
+            max_files: Limit number of files to use (None = all)
         """
-        self.data_dir = data_dir
         self.split = split
         self.max_points = max_points
+        self.use_gcs = use_gcs
         
-        # Find all parquet files
-        lidar_dir = os.path.join(data_dir, split, 'lidar')
-        self.files = [f for f in os.listdir(lidar_dir) if f.endswith('.parquet')]
+        if use_gcs:
+            import gcsfs
+            self.fs = gcsfs.GCSFileSystem()
+            bucket = "waymo_open_dataset_v_2_0_1"
+            lidar_dir = f"{bucket}/{split}/lidar"
+            
+            print(f"Listing files from gs://{lidar_dir}...")
+            all_files = self.fs.ls(lidar_dir)
+            self.files = [f for f in all_files if f.endswith('.parquet')]
+            self.lidar_prefix = f"gs://{bucket}/{split}/lidar/"
+            self.box_prefix = f"gs://{bucket}/{split}/lidar_box/"
+        else:
+            self.fs = None
+            self.data_dir = data_dir
+            lidar_dir = os.path.join(data_dir, split, 'lidar')
+            self.files = [f for f in os.listdir(lidar_dir) if f.endswith('.parquet')]
+            self.files = [os.path.join(lidar_dir, f) for f in self.files]
+        
+        # Limit files if specified
+        if max_files:
+            self.files = self.files[:max_files]
         
         # Build index: (file_idx, timestamp)
         print(f"Building dataset index from {len(self.files)} files...")
         self.index = []
-        for file_idx, filename in enumerate(self.files):
-            lidar_path = os.path.join(lidar_dir, filename)
-            df = pd.read_parquet(lidar_path, columns=['key.frame_timestamp_micros'])
+        for file_idx, filepath in enumerate(self.files):
+            if self.use_gcs:
+                df = pd.read_parquet(f"gs://{filepath}", columns=['key.frame_timestamp_micros'])
+            else:
+                df = pd.read_parquet(filepath, columns=['key.frame_timestamp_micros'])
             timestamps = df['key.frame_timestamp_micros'].unique()
             for ts in timestamps:
                 self.index.append((file_idx, ts))
+            
+            if (file_idx + 1) % 10 == 0:
+                print(f"  Indexed {file_idx + 1}/{len(self.files)} files...")
         
         print(f"Total frames: {len(self.index)}")
     
     def __len__(self):
         return len(self.index)
+    
+    def _get_paths(self, file_idx):
+        """Get lidar and box paths for a file."""
+        if self.use_gcs:
+            lidar_path = f"gs://{self.files[file_idx]}"
+            filename = self.files[file_idx].split('/')[-1]
+            box_path = f"{self.box_prefix}{filename}"
+        else:
+            lidar_path = self.files[file_idx]
+            filename = os.path.basename(lidar_path)
+            box_path = os.path.join(self.data_dir, self.split, 'lidar_box', filename)
+        return lidar_path, box_path
     
     def _range_image_to_points(self, range_image, laser_name):
         """Convert range image to point cloud [N, 4] with x,y,z,intensity"""
@@ -51,7 +88,6 @@ class WaymoDataset(Dataset):
         if np.sum(valid_mask) == 0:
             return np.zeros((0, 4), dtype=np.float32)
         
-        # Vertical angles based on sensor
         if laser_name == 0:  # TOP
             inclination = np.linspace(-np.pi/6, np.pi/6, height)
         else:
@@ -60,7 +96,6 @@ class WaymoDataset(Dataset):
         azimuth = np.linspace(-np.pi, np.pi, width)
         azimuth_grid, inclination_grid = np.meshgrid(azimuth, inclination)
         
-        # Spherical to Cartesian
         x = range_values * np.cos(inclination_grid) * np.cos(azimuth_grid)
         y = range_values * np.cos(inclination_grid) * np.sin(azimuth_grid)
         z = range_values * np.sin(inclination_grid)
@@ -70,10 +105,9 @@ class WaymoDataset(Dataset):
     
     def __getitem__(self, idx):
         file_idx, timestamp = self.index[idx]
-        filename = self.files[file_idx]
+        lidar_path, box_path = self._get_paths(file_idx)
         
         # Load LiDAR data
-        lidar_path = os.path.join(self.data_dir, self.split, 'lidar', filename)
         lidar_df = pd.read_parquet(lidar_path)
         frame_data = lidar_df[lidar_df['key.frame_timestamp_micros'] == timestamp]
         
@@ -94,13 +128,11 @@ class WaymoDataset(Dataset):
         
         points = np.vstack(all_points) if all_points else np.zeros((0, 4), dtype=np.float32)
         
-        # Subsample if too many points
         if len(points) > self.max_points:
             indices = np.random.choice(len(points), self.max_points, replace=False)
             points = points[indices]
         
         # Load bounding boxes
-        box_path = os.path.join(self.data_dir, self.split, 'lidar_box', filename)
         box_df = pd.read_parquet(box_path)
         box_frame = box_df[box_df['key.frame_timestamp_micros'] == timestamp]
         
@@ -115,9 +147,9 @@ class WaymoDataset(Dataset):
                         row['[LiDARBoxComponent].box.center.x'],
                         row['[LiDARBoxComponent].box.center.y'],
                         row['[LiDARBoxComponent].box.center.z'],
-                        row['[LiDARBoxComponent].box.size.x'],  # length
-                        row['[LiDARBoxComponent].box.size.y'],  # width
-                        row['[LiDARBoxComponent].box.size.z'],  # height
+                        row['[LiDARBoxComponent].box.size.x'],
+                        row['[LiDARBoxComponent].box.size.y'],
+                        row['[LiDARBoxComponent].box.size.z'],
                         row['[LiDARBoxComponent].box.heading'],
                     ])
         
@@ -137,4 +169,3 @@ def collate_fn(batch):
         'boxes': [item['boxes'] for item in batch],
         'num_boxes': [item['num_boxes'] for item in batch]
     }
-
