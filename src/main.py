@@ -216,7 +216,7 @@ class LiDARViewer:
             # Add intensity channel (zeros) for model
             if full_points.shape[1] == 3:
                 full_points = np.hstack([full_points, np.zeros((len(full_points), 1))])
-            pred_boxes = self.detector.predict(full_points, threshold=0.5)
+            pred_boxes = self.detector.predict(full_points, threshold=0.1)
             for pred in pred_boxes:
                 cx, cy, cz, l, w, h, heading, score = pred
                 box = {
@@ -294,7 +294,7 @@ def main():
     project_dir = os.path.dirname(script_dir)
     
     if args.local:
-        base_path = os.path.join(project_dir, 'data', 'validation')
+        base_path = os.path.join(project_dir, 'data', 'training')
         lidar_path = os.path.join(base_path, 'lidar', args.file)
         box_path = os.path.join(base_path, 'lidar_box', args.file)
     else:

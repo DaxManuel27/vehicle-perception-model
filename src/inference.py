@@ -89,7 +89,7 @@ def nms_3d(boxes, iou_threshold=0.5):
         size_sum = (l1 + l2 + w1 + w2) / 4
         
         # Keep boxes that are far enough apart
-        overlap = dist < size_sum * 0.5
+        overlap = dist < size_sum * 0.3
         order = remaining[~overlap]
     
     return [boxes[i].tolist() for i in keep]

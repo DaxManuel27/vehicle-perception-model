@@ -166,9 +166,6 @@ def main():
         max_files=args.max_files
     )
     
-    # Dataset
-    print("\nLoading dataset...")
-    train_dataset = WaymoDataset(data_dir, split='training')  # Using validation for now
     
     train_loader = DataLoader(
         train_dataset,

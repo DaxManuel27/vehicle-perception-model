@@ -92,7 +92,7 @@ class CenterPointLoss(nn.Module):
         self.heatmap_weight = heatmap_weight
         self.box_weight = box_weight
         
-        self.focal_loss = FocalLoss(alpha=2.0, beta=4.0)
+        self.focal_loss = FocalLoss(alpha=3.0, beta=4.0)
         self.box_loss = BoxRegressionLoss()
     
     def forward(self, heatmap_pred, box_pred, heatmap_target, box_target, mask):
