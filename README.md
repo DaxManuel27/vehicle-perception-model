@@ -1,4 +1,4 @@
-# Lidar Car Detection Model
+# Vehicle Perception Model
 ## Overview
 This project implements a neural network that converts raw LiDAR range images to 3D point clouds, and detects vehicles based on those points. 
 ## Waymo Open Dataset:
