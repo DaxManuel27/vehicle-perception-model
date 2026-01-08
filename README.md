@@ -12,3 +12,9 @@ This project implements a neural network that converts raw LiDAR range images to
 - Pandas
 - Numpy
 - Open3d (For visualization)
+
+## Some Examples
+### Red - Ground Truth, Green - Model Predictions
+<img width="653" height="469" alt="Screenshot 2026-01-08 at 1 00 37 PM" src="https://github.com/user-attachments/assets/e0278750-49ce-4d2a-a1c7-41c84ccfcea2" />
+<img width="1032" height="567" alt="Screenshot 2026-01-08 at 12 59 35 PM" src="https://github.com/user-attachments/assets/57652068-9fdd-4fcb-8406-0187e167a6ff" />
+
