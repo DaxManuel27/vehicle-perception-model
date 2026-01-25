@@ -12,7 +12,7 @@ import os
 
 
 class WaymoDataset(Dataset):
-    def __init__(self, data_dir, split='training', max_points=100000, use_gcs=False, max_files=None):
+    def __init__(self, data_dir, split='training', max_points=100000, use_gcs=False, max_files=None, gcs_credentials=None):
         """
         Args:
             data_dir: Path to data directory (ignored if use_gcs=True)
@@ -20,17 +20,30 @@ class WaymoDataset(Dataset):
             max_points: Maximum points to keep per frame
             use_gcs: If True, stream from GCS bucket
             max_files: Limit number of files to use (None = all)
+            gcs_credentials: Path to GCS service account JSON file, or None to use default credentials.
+                           Set to "anon" for anonymous access (public buckets only).
         """
         self.split = split
         self.max_points = max_points
         self.use_gcs = use_gcs
+        self.gcs_credentials = gcs_credentials
 
         if use_gcs:
             import gcsfs
-            # If you are using a PUBLIC bucket (like the official one)
-            # anon=True is correct. If you use your own private bucket,
-            # drop anon=True and use credentials instead.
-            self.fs = gcsfs.GCSFileSystem(anon=True)
+            
+            # Initialize GCS filesystem with appropriate credentials
+            if gcs_credentials == "anon":
+                # Anonymous access for public buckets
+                self.fs = gcsfs.GCSFileSystem(anon=True)
+                self.storage_options = {"token": "anon"}
+            elif gcs_credentials is not None:
+                # Use provided service account credentials file
+                self.fs = gcsfs.GCSFileSystem(token=gcs_credentials)
+                self.storage_options = {"token": gcs_credentials}
+            else:
+                # Use default credentials (from environment or gcloud)
+                self.fs = gcsfs.GCSFileSystem()
+                self.storage_options = {}
 
             # 👇 CHANGE THIS if your bucket name is different
             # e.g. if your data is in "waymo-lidar-data", set that here:
@@ -50,6 +63,7 @@ class WaymoDataset(Dataset):
                 raise RuntimeError(f"No parquet files found in gs://{self.lidar_dir}")
         else:
             self.fs = None
+            self.storage_options = {}
             self.data_dir = data_dir
             lidar_dir = os.path.join(data_dir, split, 'lidar')
             self.files = [os.path.join(lidar_dir, f)
@@ -70,7 +84,7 @@ class WaymoDataset(Dataset):
                 df = pd.read_parquet(
                     lidar_path,
                     columns=['key.frame_timestamp_micros'],
-                    storage_options={"token": "anon"}
+                    storage_options=self.storage_options
                 )
             else:
                 df = pd.read_parquet(filepath, columns=['key.frame_timestamp_micros'])
@@ -111,7 +125,7 @@ class WaymoDataset(Dataset):
         if self.use_gcs:
             lidar_df = pd.read_parquet(
                 lidar_path,
-                storage_options={"token": "anon"}
+                storage_options=self.storage_options
             )
         else:
             lidar_df = pd.read_parquet(lidar_path)
@@ -143,7 +157,7 @@ class WaymoDataset(Dataset):
         if self.use_gcs:
             box_df = pd.read_parquet(
                 box_path,
-                storage_options={"token": "anon"}
+                storage_options=self.storage_options
             )
         else:
             box_df = pd.read_parquet(box_path)

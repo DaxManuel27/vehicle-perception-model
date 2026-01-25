@@ -136,6 +136,8 @@ def main():
                         help='Resume from checkpoint')
     parser.add_argument('--gcs', action='store_true',
                         help='Stream data from GCS instead of local files')
+    parser.add_argument('--gcs_credentials', type=str, default=None,
+                        help='Path to GCS service account JSON file. If not provided, uses default credentials. Set to "anon" for anonymous access.')
     parser.add_argument('--max_files', type=int, default=None,
                         help='Limit number of files to use')
     args = parser.parse_args()
@@ -163,7 +165,8 @@ def main():
         data_dir, 
         split='training',
         use_gcs=args.gcs,
-        max_files=args.max_files
+        max_files=args.max_files,
+        gcs_credentials=args.gcs_credentials
     )
     
     
