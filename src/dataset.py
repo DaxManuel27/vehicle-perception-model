@@ -10,6 +10,7 @@ import numpy as np
 import os
 
 
+
 class WaymoDataset(Dataset):
     def __init__(self, data_dir, split='training', max_points=100000, use_gcs=False, max_files=None):
         """
@@ -23,119 +24,132 @@ class WaymoDataset(Dataset):
         self.split = split
         self.max_points = max_points
         self.use_gcs = use_gcs
-        
+
         if use_gcs:
             import gcsfs
-            self.fs = gcsfs.GCSFileSystem()
-            bucket = "waymo_open_dataset_v_2_0_1"
-            lidar_dir = f"{bucket}/{split}/lidar"
-            
-            print(f"Listing files from gs://{lidar_dir}...")
-            all_files = self.fs.ls(lidar_dir)
-            self.files = [f for f in all_files if f.endswith('.parquet')]
-            self.lidar_prefix = f"gs://{bucket}/{split}/lidar/"
-            self.box_prefix = f"gs://{bucket}/{split}/lidar_box/"
+            # If you are using a PUBLIC bucket (like the official one)
+            # anon=True is correct. If you use your own private bucket,
+            # drop anon=True and use credentials instead.
+            self.fs = gcsfs.GCSFileSystem(anon=True)
+
+            # 👇 CHANGE THIS if your bucket name is different
+            # e.g. if your data is in "waymo-lidar-data", set that here:
+            # self.bucket = "waymo-lidar-data"
+            self.bucket = "waymo-lidar-data"
+
+            # gcsfs paths do NOT include "gs://"
+            self.lidar_dir = f"{self.bucket}/{split}/lidar"
+            self.box_dir = f"{self.bucket}/{split}/lidar_box"
+
+            print(f"Listing files from gs://{self.lidar_dir} ...")
+            all_files = self.fs.ls(self.lidar_dir)
+            # all_files look like: "waymo_open_dataset_v_2_0_1/training/lidar/xxx.parquet"
+            self.files = sorted([f for f in all_files if f.endswith('.parquet')])
+
+            if not self.files:
+                raise RuntimeError(f"No parquet files found in gs://{self.lidar_dir}")
         else:
             self.fs = None
             self.data_dir = data_dir
             lidar_dir = os.path.join(data_dir, split, 'lidar')
-            self.files = [f for f in os.listdir(lidar_dir) if f.endswith('.parquet')]
-            self.files = [os.path.join(lidar_dir, f) for f in self.files]
-        
+            self.files = [os.path.join(lidar_dir, f)
+                          for f in os.listdir(lidar_dir)
+                          if f.endswith('.parquet')]
+
         # Limit files if specified
         if max_files:
             self.files = self.files[:max_files]
-        
+
         # Build index: (file_idx, timestamp)
         print(f"Building dataset index from {len(self.files)} files...")
         self.index = []
         for file_idx, filepath in enumerate(self.files):
             if self.use_gcs:
-                df = pd.read_parquet(f"gs://{filepath}", columns=['key.frame_timestamp_micros'])
+                # filepath is like "waymo_open_dataset_v_2_0_1/training/lidar/xxx.parquet"
+                lidar_path = f"gs://{filepath}"
+                df = pd.read_parquet(
+                    lidar_path,
+                    columns=['key.frame_timestamp_micros'],
+                    storage_options={"token": "anon"}
+                )
             else:
                 df = pd.read_parquet(filepath, columns=['key.frame_timestamp_micros'])
+
             timestamps = df['key.frame_timestamp_micros'].unique()
             for ts in timestamps:
                 self.index.append((file_idx, ts))
-            
+
             if (file_idx + 1) % 10 == 0:
                 print(f"  Indexed {file_idx + 1}/{len(self.files)} files...")
-        
+
         print(f"Total frames: {len(self.index)}")
-    
+
     def __len__(self):
         return len(self.index)
-    
+
     def _get_paths(self, file_idx):
         """Get lidar and box paths for a file."""
         if self.use_gcs:
+            # self.files[file_idx] = "bucket/split/lidar/xxx.parquet"
             lidar_path = f"gs://{self.files[file_idx]}"
             filename = self.files[file_idx].split('/')[-1]
-            box_path = f"{self.box_prefix}{filename}"
+            box_path = f"gs://{self.box_dir}/{filename}"
         else:
             lidar_path = self.files[file_idx]
             filename = os.path.basename(lidar_path)
             box_path = os.path.join(self.data_dir, self.split, 'lidar_box', filename)
         return lidar_path, box_path
-    
-    def _range_image_to_points(self, range_image, laser_name):
-        """Convert range image to point cloud [N, 4] with x,y,z,intensity"""
-        height, width = range_image.shape[0], range_image.shape[1]
-        range_values = range_image[:, :, 0]
-        intensity = range_image[:, :, 1]
-        valid_mask = range_values > 0
-        
-        if np.sum(valid_mask) == 0:
-            return np.zeros((0, 4), dtype=np.float32)
-        
-        if laser_name == 0:  # TOP
-            inclination = np.linspace(-np.pi/6, np.pi/6, height)
-        else:
-            inclination = np.linspace(-np.pi/8, np.pi/8, height)
-        
-        azimuth = np.linspace(-np.pi, np.pi, width)
-        azimuth_grid, inclination_grid = np.meshgrid(azimuth, inclination)
-        
-        x = range_values * np.cos(inclination_grid) * np.cos(azimuth_grid)
-        y = range_values * np.cos(inclination_grid) * np.sin(azimuth_grid)
-        z = range_values * np.sin(inclination_grid)
-        
-        points = np.stack([x, y, z, intensity], axis=-1)
-        return points[valid_mask].astype(np.float32)
-    
+
+    # keep your _range_image_to_points and __getitem__ methods as-is,
+    # but with a small tweak to GCS reads:
+
     def __getitem__(self, idx):
         file_idx, timestamp = self.index[idx]
         lidar_path, box_path = self._get_paths(file_idx)
-        
+
         # Load LiDAR data
-        lidar_df = pd.read_parquet(lidar_path)
+        if self.use_gcs:
+            lidar_df = pd.read_parquet(
+                lidar_path,
+                storage_options={"token": "anon"}
+            )
+        else:
+            lidar_df = pd.read_parquet(lidar_path)
+
         frame_data = lidar_df[lidar_df['key.frame_timestamp_micros'] == timestamp]
-        
+
         # Convert all sensors to point cloud
         all_points = []
         for _, row in frame_data.iterrows():
             range_bytes = row['[LiDARComponent].range_image_return1.values']
             range_shape = row['[LiDARComponent].range_image_return1.shape']
-            
+
             range_image = np.frombuffer(range_bytes, dtype=np.float32)
             shape = tuple(range_shape) if isinstance(range_shape, (list, tuple)) else range_shape
             range_image = range_image.reshape(shape)
-            
+
             laser_name = row['key.laser_name']
             points = self._range_image_to_points(range_image, laser_name)
             if len(points) > 0:
                 all_points.append(points)
-        
+
         points = np.vstack(all_points) if all_points else np.zeros((0, 4), dtype=np.float32)
-        
+
         if len(points) > self.max_points:
             indices = np.random.choice(len(points), self.max_points, replace=False)
             points = points[indices]
-        
+
         # Load bounding boxes
-        box_df = pd.read_parquet(box_path)
+        if self.use_gcs:
+            box_df = pd.read_parquet(
+                box_path,
+                storage_options={"token": "anon"}
+            )
+        else:
+            box_df = pd.read_parquet(box_path)
+
         box_frame = box_df[box_df['key.frame_timestamp_micros'] == timestamp]
-        
+
         boxes = []
         box_center_col = '[LiDARBoxComponent].box.center.x'
         if box_center_col in box_frame.columns:
@@ -152,9 +166,9 @@ class WaymoDataset(Dataset):
                         row['[LiDARBoxComponent].box.size.z'],
                         row['[LiDARBoxComponent].box.heading'],
                     ])
-        
+
         boxes = np.array(boxes, dtype=np.float32) if boxes else np.zeros((0, 7), dtype=np.float32)
-        
+
         return {
             'points': torch.from_numpy(points),
             'boxes': torch.from_numpy(boxes),
