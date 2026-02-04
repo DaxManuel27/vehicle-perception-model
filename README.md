@@ -1,2 +1,2 @@
-Lidar Car Detection Model
-This neural network model is built using waymo's open dataset
+Vehicle Perception Model built with PyTorch and Waymo's Open Dataset
+
